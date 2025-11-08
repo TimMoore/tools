@@ -115,7 +115,17 @@ function HexContents({ file, onClearFile }: HexContentsProps) {
               )}
               onMouseEnter={() => setHoverOffset(offset)}
             >
-              {ascii ?? "."}
+              {ascii ?? (
+                <span
+                  className={cn(
+                    hoverOffset === offset
+                      ? "text-muted"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  &bull;
+                </span>
+              )}
             </div>
           ))}
         </div>
