@@ -1,7 +1,7 @@
 "use client";
 
 import { FileUp, X } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -15,7 +15,11 @@ import {
 
 interface FileState {
   filename: string;
-  bytes: Uint8Array;
+  data: Array<{
+    byte: number;
+    hex: string;
+    ascii: string | undefined;
+  }>;
 }
 
 export function HexViewer() {
@@ -24,8 +28,14 @@ export function HexViewer() {
   // Handle file input change
   const handleFile = async (file: File) => {
     setFile("pending");
-    const arrayBuffer = await file.arrayBuffer();
-    setFile({ filename: file.name, bytes: new Uint8Array(arrayBuffer) });
+    const data = Array.from(new Uint8Array(await file.arrayBuffer())).map(
+      (byte) => ({
+        byte,
+        hex: toHex(byte),
+        ascii: toASCII(byte),
+      })
+    );
+    setFile({ filename: file.name, data });
   };
 
   if (file) {
@@ -33,32 +43,104 @@ export function HexViewer() {
       return <p>Loading…</p>;
     }
 
-    return (
-      <section className="grow flex flex-col gap-2 overflow-hidden">
-        <header className="flex-none flex items-center font-bold text-lg gap-2">
-          Hex Viewer: <span>{file.filename}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="ml-auto"
-            onClick={() => setFile(undefined)}
-          >
-            <X />
-          </Button>
-        </header>
-        <pre className="text-sm font-mono whitespace-pre-wrap max-w-7xl text-center overflow-x-hidden overflow-y-auto">
-          {Array.from(file.bytes)
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join(" ")}
-        </pre>
-        <footer className="flex-none ml-auto p-2 text-xs text-muted-foreground">
-          {file.bytes.length} bytes
-        </footer>
-      </section>
-    );
+    return <HexContents file={file} onClearFile={() => setFile(undefined)} />;
   }
 
   return <FileChooser onFileChosen={handleFile} />;
+}
+
+interface HexContentsProps {
+  file: FileState;
+  onClearFile: () => void;
+}
+
+function HexContents({ file, onClearFile }: HexContentsProps) {
+  const [hoverOffset, setHoverOffset] = useState<number>();
+
+  const hoverInfo = useMemo(() => {
+    if (hoverOffset === undefined) return undefined;
+
+    const { hex, ascii } = file.data[hoverOffset];
+
+    return { offset: hoverOffset, hex, ascii };
+  }, [hoverOffset, file.data]);
+
+  return (
+    <section className="grow flex flex-col gap-4 overflow-hidden max-w-7xl">
+      <header className="flex-none flex items-center gap-2 font-bold text-lg">
+        Hex Viewer: <span>{file.filename}</span>
+        <Button
+          variant="outline"
+          size="icon"
+          className="ml-auto"
+          onClick={onClearFile}
+        >
+          <X />
+        </Button>
+      </header>
+      <div className="grid grid-cols-[3fr_1fr] gap-5 text-center text-sm font-mono overflow-x-hidden overflow-y-auto">
+        {/* Hex values */}
+        <div
+          className="flex flex-wrap gap-x-2.5"
+          onMouseLeave={() => {
+            setHoverOffset(undefined);
+          }}
+        >
+          {file.data.map(({ hex }, offset) => (
+            <div
+              key={offset}
+              className={cn(
+                "w-5",
+                hoverOffset === offset && "bg-primary text-background"
+              )}
+              onMouseEnter={() => setHoverOffset(offset)}
+            >
+              {hex}
+            </div>
+          ))}
+        </div>
+        {/* ASCII representation */}
+        <div
+          className="flex flex-wrap"
+          onMouseLeave={() => {
+            setHoverOffset(undefined);
+          }}
+        >
+          {file.data.map(({ ascii }, offset) => (
+            <div
+              key={offset}
+              className={cn(
+                "w-2.5",
+                hoverOffset === offset && "bg-primary text-background"
+              )}
+              onMouseEnter={() => setHoverOffset(offset)}
+            >
+              {ascii ?? "."}
+            </div>
+          ))}
+        </div>
+      </div>
+      <footer className="flex-none flex items-center gap-2 text-xs text-muted-foreground">
+        {hoverInfo !== undefined && (
+          <>
+            <strong>Offset</strong>
+            <span>
+              {hoverInfo.offset} (0x{toHex(hoverInfo.offset)})
+            </span>
+            <strong>Hex</strong>
+            <span>{hoverInfo.hex}</span>
+            {hoverInfo.ascii !== undefined && (
+              <>
+                <strong>ASCII</strong>
+                <span>{hoverInfo.ascii}</span>
+              </>
+            )}
+          </>
+        )}
+        <span className="ml-auto">{file.data.length} bytes</span>
+      </footer>
+    </section>
+  );
 }
 
 interface FileChooserProps {
@@ -126,4 +208,15 @@ function FileChooser({ onFileChosen }: FileChooserProps) {
       </EmptyContent>
     </Empty>
   );
+}
+
+function toHex(byte: number): string {
+  return byte.toString(16).padStart(2, "0");
+}
+
+function toASCII(byte: number): string | undefined {
+  // Display printable ASCII characters: 32 (space) to 126 (~)
+  if (byte >= 32 && byte <= 126) {
+    return String.fromCharCode(byte);
+  }
 }
