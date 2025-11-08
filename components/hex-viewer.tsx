@@ -1,7 +1,7 @@
 "use client";
 
 import { FileUp, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -12,6 +12,7 @@ import {
   EmptyDescription,
   EmptyContent,
 } from "./ui/empty";
+import { Spinner } from "./ui/spinner";
 
 interface FileState {
   filename: string;
@@ -23,26 +24,31 @@ interface FileState {
 }
 
 export function HexViewer() {
-  const [file, setFile] = useState<FileState | "pending">();
+  const [isPending, startTransition] = useTransition();
+  const [file, setFile] = useState<FileState>();
 
   // Handle file input change
   const handleFile = async (file: File) => {
-    setFile("pending");
-    const data = Array.from(new Uint8Array(await file.arrayBuffer())).map(
-      (byte) => ({
-        byte,
-        hex: toHex(byte),
-        ascii: toASCII(byte),
-      })
-    );
-    setFile({ filename: file.name, data });
+    startTransition(async () => {
+      const fileState = await loadFileAction(file);
+      setFile(fileState);
+    });
   };
 
-  if (file) {
-    if (file === "pending") {
-      return <p>Loading…</p>;
-    }
+  if (isPending) {
+    return (
+      <Empty className="flex-none border border-dashed">
+        <EmptyHeader>
+          <EmptyMedia>
+            <Spinner className="size-9" />
+          </EmptyMedia>
+          <EmptyTitle>Loading&hellip;</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
 
+  if (file) {
     return <HexContents file={file} onClearFile={() => setFile(undefined)} />;
   }
 
@@ -218,6 +224,17 @@ function FileChooser({ onFileChosen }: FileChooserProps) {
       </EmptyContent>
     </Empty>
   );
+}
+
+async function loadFileAction(file: File): Promise<FileState> {
+  const data = Array.from(new Uint8Array(await file.arrayBuffer())).map(
+    (byte) => ({
+      byte,
+      hex: toHex(byte),
+      ascii: toASCII(byte),
+    })
+  );
+  return { filename: file.name, data };
 }
 
 function toHex(byte: number): string {
