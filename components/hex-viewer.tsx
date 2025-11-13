@@ -2,6 +2,7 @@
 
 import { FileUp, X } from "lucide-react";
 import { useMemo, useState, useTransition, useEffect, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -93,20 +94,18 @@ function HexContents({ file, onClearFile }: HexContentsProps) {
     return () => ro.disconnect();
   }, []);
 
-  // Slice bytes into row arrays for rendering
-  const rows = useMemo(() => {
-    if (columns <= 0) return [];
-    const total = file.data.length;
-    const rowCount = Math.ceil(total / columns);
-    const out: Array<typeof file.data> = [];
-    for (let r = 0; r < rowCount; r++) {
-      const start = r * columns;
-      out.push(file.data.slice(start, start + columns));
-    }
-    return out;
-  }, [file, columns]);
+  // Row count for virtualization
+  const rowCount = columns > 0 ? Math.ceil(file.data.length / columns) : 0;
 
-  // Grid template columns style
+  // Virtualizer (each row has fixed height ~24px)
+  const rowVirtualizer = useVirtualizer({
+    count: rowCount,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => 24,
+    overscan: 8,
+  });
+
+  // Grid template columns style (shared by both grids per row)
   const gridTemplate =
     columns > 0
       ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }
@@ -127,65 +126,79 @@ function HexContents({ file, onClearFile }: HexContentsProps) {
       </header>
       <div
         ref={containerRef}
-        className="grow flex flex-col gap-1 text-center text-sm font-mono overflow-x-hidden overflow-y-auto min-w-0 w-full"
+        className="w-full min-w-0 overflow-x-hidden overflow-y-auto text-center text-sm font-mono"
+        style={{ height: rowCount * 24 }}
         onMouseLeave={() => setHoverOffset(undefined)}
       >
         {columns === 0 && (
           <div className="py-4 text-muted-foreground">Measuring…</div>
         )}
-        {rows.map((row, rowIndex) => {
-          const startOffset = rowIndex * columns;
-          return (
-            <div key={rowIndex} className="flex gap-5">
-              {/* Hex portion as grid */}
-              <div className="grid gap-x-2.5" style={gridTemplate}>
-                {row.map(({ hex }, i) => {
-                  const offset = startOffset + i;
-                  return (
-                    <div
-                      key={offset}
-                      className={cn(
-                        "w-5",
-                        hoverOffset === offset && "bg-primary text-background"
-                      )}
-                      onMouseEnter={() => setHoverOffset(offset)}
-                    >
-                      {hex}
-                    </div>
-                  );
-                })}
-              </div>
-              {/* ASCII portion as grid */}
-              <div className="grid" style={gridTemplate}>
-                {row.map(({ ascii }, i) => {
-                  const offset = startOffset + i;
-                  return (
-                    <div
-                      key={offset}
-                      className={cn(
-                        "w-2.5 text-center",
-                        hoverOffset === offset && "bg-primary text-background"
-                      )}
-                      onMouseEnter={() => setHoverOffset(offset)}
-                    >
-                      {ascii ?? (
-                        <span
+        {columns > 0 && (
+          <div
+            className="relative w-full"
+            style={{ height: rowVirtualizer.getTotalSize() }}
+          >
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const rowIndex = virtualRow.index;
+              const startOffset = rowIndex * columns;
+              const slice = file.data.slice(startOffset, startOffset + columns);
+              return (
+                <div
+                  key={virtualRow.key}
+                  className={cn("absolute left-0 w-full flex gap-5")}
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <div className="grid gap-x-2.5" style={gridTemplate}>
+                    {slice.map(({ hex }, i) => {
+                      const offset = startOffset + i;
+                      return (
+                        <div
+                          key={offset}
                           className={cn(
-                            hoverOffset === offset
-                              ? "text-muted"
-                              : "text-muted-foreground"
+                            "w-5",
+                            hoverOffset === offset &&
+                              "bg-primary text-background"
                           )}
+                          onMouseEnter={() => setHoverOffset(offset)}
                         >
-                          &bull;
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
+                          {hex}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="grid" style={gridTemplate}>
+                    {slice.map(({ ascii }, i) => {
+                      const offset = startOffset + i;
+                      return (
+                        <div
+                          key={offset}
+                          className={cn(
+                            "w-2.5 text-center",
+                            hoverOffset === offset &&
+                              "bg-primary text-background"
+                          )}
+                          onMouseEnter={() => setHoverOffset(offset)}
+                        >
+                          {ascii ?? (
+                            <span
+                              className={cn(
+                                hoverOffset === offset
+                                  ? "text-muted"
+                                  : "text-muted-foreground"
+                              )}
+                            >
+                              &bull;
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       <footer className="flex-none flex items-center gap-2 text-xs text-muted-foreground">
         {hoverInfo !== undefined && (
