@@ -1,7 +1,7 @@
 "use client";
 
 import { FileUp, X } from "lucide-react";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -60,8 +60,13 @@ interface HexContentsProps {
   onClearFile: () => void;
 }
 
+const CELL_WIDTH_PX = 20;
+const CELL_GAP_PX = 10;
+
 function HexContents({ file, onClearFile }: HexContentsProps) {
   const [hoverOffset, setHoverOffset] = useState<number>();
+  const [columns, setColumns] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const hoverInfo = useMemo(() => {
     if (hoverOffset === undefined) return undefined;
@@ -71,8 +76,44 @@ function HexContents({ file, onClearFile }: HexContentsProps) {
     return { offset: hoverOffset, hex, ascii };
   }, [hoverOffset, file.data]);
 
+  // Use fixed cell width for column calculation
+  useEffect(() => {
+    function update() {
+      if (!containerRef.current) return;
+      const width = containerRef.current.clientWidth;
+      const nextCols = Math.max(
+        1,
+        Math.floor(width / (CELL_WIDTH_PX + CELL_GAP_PX))
+      );
+      setColumns(nextCols);
+    }
+    update();
+    const ro = new ResizeObserver(update);
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  // Slice bytes into row arrays for rendering
+  const rows = useMemo(() => {
+    if (columns <= 0) return [];
+    const total = file.data.length;
+    const rowCount = Math.ceil(total / columns);
+    const out: Array<typeof file.data> = [];
+    for (let r = 0; r < rowCount; r++) {
+      const start = r * columns;
+      out.push(file.data.slice(start, start + columns));
+    }
+    return out;
+  }, [file, columns]);
+
+  // Grid template columns style
+  const gridTemplate =
+    columns > 0
+      ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }
+      : {};
+
   return (
-    <section className="grow flex flex-col gap-4 overflow-hidden max-w-7xl">
+    <section className="grow flex flex-col gap-4 overflow-hidden max-w-7xl min-w-0 w-full">
       <header className="flex-none flex items-center gap-2 font-bold text-lg">
         Hex Viewer: <span>{file.filename}</span>
         <Button
@@ -84,57 +125,67 @@ function HexContents({ file, onClearFile }: HexContentsProps) {
           <X />
         </Button>
       </header>
-      <div className="grid grid-cols-[3fr_1fr] gap-5 text-center text-sm font-mono overflow-x-hidden overflow-y-auto">
-        {/* Hex values */}
-        <div
-          className="flex flex-wrap gap-x-2.5"
-          onMouseLeave={() => {
-            setHoverOffset(undefined);
-          }}
-        >
-          {file.data.map(({ hex }, offset) => (
-            <div
-              key={offset}
-              className={cn(
-                "w-5",
-                hoverOffset === offset && "bg-primary text-background"
-              )}
-              onMouseEnter={() => setHoverOffset(offset)}
-            >
-              {hex}
+      <div
+        ref={containerRef}
+        className="grow flex flex-col gap-1 text-center text-sm font-mono overflow-x-hidden overflow-y-auto min-w-0 w-full"
+        onMouseLeave={() => setHoverOffset(undefined)}
+      >
+        {columns === 0 && (
+          <div className="py-4 text-muted-foreground">Measuring…</div>
+        )}
+        {rows.map((row, rowIndex) => {
+          const startOffset = rowIndex * columns;
+          return (
+            <div key={rowIndex} className="flex gap-5">
+              {/* Hex portion as grid */}
+              <div className="grid gap-x-2.5" style={gridTemplate}>
+                {row.map(({ hex }, i) => {
+                  const offset = startOffset + i;
+                  return (
+                    <div
+                      key={offset}
+                      className={cn(
+                        "w-5",
+                        hoverOffset === offset && "bg-primary text-background"
+                      )}
+                      onMouseEnter={() => setHoverOffset(offset)}
+                    >
+                      {hex}
+                    </div>
+                  );
+                })}
+              </div>
+              {/* ASCII portion as grid */}
+              <div className="grid" style={gridTemplate}>
+                {row.map(({ ascii }, i) => {
+                  const offset = startOffset + i;
+                  return (
+                    <div
+                      key={offset}
+                      className={cn(
+                        "w-2.5 text-center",
+                        hoverOffset === offset && "bg-primary text-background"
+                      )}
+                      onMouseEnter={() => setHoverOffset(offset)}
+                    >
+                      {ascii ?? (
+                        <span
+                          className={cn(
+                            hoverOffset === offset
+                              ? "text-muted"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          &bull;
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          ))}
-        </div>
-        {/* ASCII representation */}
-        <div
-          className="flex flex-wrap"
-          onMouseLeave={() => {
-            setHoverOffset(undefined);
-          }}
-        >
-          {file.data.map(({ ascii }, offset) => (
-            <div
-              key={offset}
-              className={cn(
-                "w-2.5",
-                hoverOffset === offset && "bg-primary text-background"
-              )}
-              onMouseEnter={() => setHoverOffset(offset)}
-            >
-              {ascii ?? (
-                <span
-                  className={cn(
-                    hoverOffset === offset
-                      ? "text-muted"
-                      : "text-muted-foreground"
-                  )}
-                >
-                  &bull;
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
       <footer className="flex-none flex items-center gap-2 text-xs text-muted-foreground">
         {hoverInfo !== undefined && (
@@ -154,6 +205,7 @@ function HexContents({ file, onClearFile }: HexContentsProps) {
           </>
         )}
         <span className="ml-auto">{file.data.length} bytes</span>
+        <span>{columns} columns</span>
       </footer>
     </section>
   );
